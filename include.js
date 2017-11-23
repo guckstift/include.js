@@ -6,6 +6,7 @@
 
 var include = (function() {
 
+	var noop = function(){};
 	var debugMode = false;
 	var urlModMap = {};
 	var currentScriptUrl = "";
@@ -13,23 +14,19 @@ var include = (function() {
 	var currentScriptMod = null;
 	var bakeMode = false;
 	var bakedSrc = "";
+	var bakeCallback = noop;
 	var totalIncludesToFinalize = 0;
 	var modCount = 0;
 	var aliasMap = {};
 	
 	function include(urls, callback)
 	{
+		updateCurrentScriptInfo();
+		
 		var args = validateArgs(urls, callback);
 		
 		callback = args.callback;
 		urls = implyUrls(args.urls, callback);
-		
-		if(document.currentScript) {
-			currentScriptUrl = document.currentScript.src;
-			currentScriptDir = currentScriptUrl.split("?")[0];
-			currentScriptDir = currentScriptDir.split("/").slice(0, -1).join("/");
-			currentScriptMod = getMod(currentScriptUrl);
-		}
 		
 		totalIncludesToFinalize++;
 		var urlsToLoad = urls.length;
@@ -91,23 +88,59 @@ var include = (function() {
 	include.bake = function bake(urls, callback)
 	{
 		bakeMode = true;
+		bakeCallback = callback;
 		
 		bakedSrc = "";
 		bakedSrc += "(function() {\n";
 		bakedSrc += "var mods = {};\n";
 		
-		include(urls, callback);
+		include(urls);
 	};
 	
 	include.addAlias = function addAlias(alias, url)
 	{
-		aliasMap[alias] = url;
+		updateCurrentScriptInfo();
+		
+		if(!aliasMap.hasOwnProperty(currentScriptDir)) {
+			aliasMap[currentScriptDir] = {};
+		}
+		
+		aliasMap[currentScriptDir][alias] = url;
 	};
+	
+	include.getCurrentScriptDir = function()
+	{
+		return currentScriptDir;
+	};
+	
+	/*
+		experimental AMD connector
+	*/
+	window.define = function(modname, deps, callback)
+	{
+		include(callback);
+	};
+	
+	window.define.amd = {};
+	/*
+		experimental AMD connector. END
+	*/
+	
+	function updateCurrentScriptInfo()
+	{
+		if(document.currentScript) {
+			currentScriptUrl = document.currentScript.src;
+			currentScriptDir = currentScriptUrl.split("?")[0];
+			currentScriptDir = currentScriptDir.split("/").slice(0, -1).join("/");
+			currentScriptMod = getMod(currentScriptUrl);
+		}
+	}
 	
 	function bakeFinished()
 	{
 		bakedSrc += "\n})();";
-		console.log(bakedSrc);
+		
+		bakeCallback(bakedSrc);
 		
 		bakeMode = false;
 	}
@@ -173,13 +206,16 @@ var include = (function() {
 	
 	function hasAlias(query)
 	{
-		return aliasMap.hasOwnProperty(query);
+		return (
+			aliasMap.hasOwnProperty(currentScriptDir) &&
+			aliasMap[currentScriptDir].hasOwnProperty(query)
+		);
 	}
 	
 	function resolveAlias(query)
 	{
 		if(hasAlias(query)) {
-			return aliasMap[query];
+			return aliasMap[currentScriptDir][query];
 		}
 		else {
 			return query;
